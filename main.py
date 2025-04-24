@@ -1,5 +1,7 @@
 
 import requests
+import cloudscraper  # Add cloudscraper import
+import httpx  # Add httpx for HTTP/2 support
 from bs4 import BeautifulSoup
 import pandas as pd
 import sqlite3
@@ -63,19 +65,27 @@ def find_latest_files(url, patterns):
             'Referer': 'https://data.london.gov.uk/'
         }
         
-        # Try with session to maintain cookies
-        session = requests.Session()
+        # Try with HTTP/2 client
+        logging.info("Creating HTTP/2 client...")
+        client = httpx.Client(http2=True, follow_redirects=True)
         
         # First visit the main site to get cookies
         try:
-            logging.info("Visiting main site to get cookies...")
-            session.get('https://data.london.gov.uk/', headers=headers, timeout=30)
+            logging.info("Visiting main site to get cookies with HTTP/2...")
+            client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
         except Exception as e:
-            logging.warning(f"Error visiting main site: {e}")
+            logging.warning(f"Error visiting main site with HTTP/2: {e}")
+            # Fall back to cloudscraper if HTTP/2 fails
+            logging.info("Falling back to cloudscraper...")
+            client = cloudscraper.create_scraper()
+            try:
+                client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
+            except Exception as e:
+                logging.warning(f"Error visiting main site with cloudscraper: {e}")
         
         # Now try to get the dataset page
         logging.info("Now trying to access the dataset page...")
-        response = session.get(url, headers=headers, timeout=30)
+        response = client.get(url, headers=headers, timeout=30)
         
         # Log response details for debugging
         logging.info(f"Response status code: {response.status_code}")
@@ -192,7 +202,7 @@ def find_latest_files(url, patterns):
                         latest_files[key] = (file_url, current_date, filename_from_url)
                     break # Move to next item once matched
 
-    except requests.exceptions.RequestException as e:
+    except (httpx.RequestError, httpx.HTTPStatusError) as e:
         logging.error(f"Error fetching URL {url}: {e}")
         return None # Indicate failure
     except Exception as e:
@@ -220,28 +230,36 @@ def download_file(url, local_path):
             'Referer': 'https://data.london.gov.uk/'
         }
         
-        # Try with session to maintain cookies
-        session = requests.Session()
+        # Try with HTTP/2 client first
+        logging.info("Creating HTTP/2 client for download...")
+        client = httpx.Client(http2=True, follow_redirects=True)
         
         # First visit the main site to get cookies
         try:
-            logging.info("Visiting main site to get cookies before download...")
-            session.get('https://data.london.gov.uk/', headers=headers, timeout=30)
+            logging.info("Visiting main site to get cookies with HTTP/2 before download...")
+            client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
         except Exception as e:
-            logging.warning(f"Error visiting main site: {e}")
+            logging.warning(f"Error visiting main site with HTTP/2: {e}")
+            # Fall back to cloudscraper if HTTP/2 fails
+            logging.info("Falling back to cloudscraper for download...")
+            client = cloudscraper.create_scraper()
+            try:
+                client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
+            except Exception as e:
+                logging.warning(f"Error visiting main site with cloudscraper: {e}")
         
         # Log the download attempt
-        logging.info(f"Attempting to download file with session and headers...")
+        logging.info(f"Attempting to download file with HTTP/2 client...")
         
-        # Try to download with session
-        with session.get(url, headers=headers, stream=True, timeout=60) as r:
+        # Try to download with HTTP/2 client
+        with client.stream("GET", url, headers=headers, timeout=60) as r:
             # Log response details for debugging
             logging.info(f"Download response status code: {r.status_code}")
             logging.info(f"Download response headers: {r.headers}")
             
             r.raise_for_status()
             with open(local_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
+                for chunk in r.iter_bytes(chunk_size=8192):
                     f.write(chunk)
         
         # Verify the file was downloaded and has content
@@ -251,7 +269,7 @@ def download_file(url, local_path):
         else:
             logging.error(f"File download appears to have failed. File empty or not created.")
             return False
-    except requests.exceptions.RequestException as e:
+    except (httpx.RequestError, httpx.HTTPStatusError) as e:
         logging.error(f"Error downloading {url}: {e}")
         return False
     except Exception as e:
