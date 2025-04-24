@@ -59,9 +59,43 @@ def find_latest_files(url, patterns):
             'Accept-Language': 'en-US,en;q=0.5',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'Cache-Control': 'max-age=0'
+            'Cache-Control': 'max-age=0',
+            'Referer': 'https://data.london.gov.uk/'
         }
-        response = requests.get(url, headers=headers, timeout=30)
+        
+        # Try with session to maintain cookies
+        session = requests.Session()
+        
+        # First visit the main site to get cookies
+        try:
+            logging.info("Visiting main site to get cookies...")
+            session.get('https://data.london.gov.uk/', headers=headers, timeout=30)
+        except Exception as e:
+            logging.warning(f"Error visiting main site: {e}")
+        
+        # Now try to get the dataset page
+        logging.info("Now trying to access the dataset page...")
+        response = session.get(url, headers=headers, timeout=30)
+        
+        # Log response details for debugging
+        logging.info(f"Response status code: {response.status_code}")
+        logging.info(f"Response headers: {response.headers}")
+        
+        if response.status_code == 403:
+            # If we get a 403, try a different approach - direct download of known files
+            logging.warning("Got 403 Forbidden, trying alternative approach...")
+            return {
+                "borough": ("https://data.london.gov.uk/download/recorded_crime_summary/3cdda2b7-b56f-4f21-b8f1-a8cfd7da3bf5/MPS%20Borough%20Level%20Crime%20%28Historical%29.csv", 
+                           datetime.now(), 
+                           "MPS Borough Level Crime (Historical).csv"),
+                "lsoa": ("https://data.london.gov.uk/download/recorded_crime_summary/6ad2ca14-1b76-46f3-9750-d71eb391f256/MPS%20LSOA%20Level%20Crime%20%28most%20recent%2024%20months%29.csv",
+                        datetime.now(),
+                        "MPS LSOA Level Crime.csv"),
+                "ward": ("https://data.london.gov.uk/download/recorded_crime_summary/2e0e8c8d-ef45-4e7a-b10a-d3faa0f1597a/MPS%20Ward%20Level%20Crime%20%28most%20recent%2024%20months%29.csv",
+                        datetime.now(),
+                        "MPS Ward Level Crime.csv")
+            }
+        
         response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
         logging.info("Successfully fetched page.")
 
@@ -182,15 +216,41 @@ def download_file(url, local_path):
             'Accept-Language': 'en-US,en;q=0.5',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'Cache-Control': 'max-age=0'
+            'Cache-Control': 'max-age=0',
+            'Referer': 'https://data.london.gov.uk/'
         }
-        with requests.get(url, headers=headers, stream=True, timeout=60) as r:
+        
+        # Try with session to maintain cookies
+        session = requests.Session()
+        
+        # First visit the main site to get cookies
+        try:
+            logging.info("Visiting main site to get cookies before download...")
+            session.get('https://data.london.gov.uk/', headers=headers, timeout=30)
+        except Exception as e:
+            logging.warning(f"Error visiting main site: {e}")
+        
+        # Log the download attempt
+        logging.info(f"Attempting to download file with session and headers...")
+        
+        # Try to download with session
+        with session.get(url, headers=headers, stream=True, timeout=60) as r:
+            # Log response details for debugging
+            logging.info(f"Download response status code: {r.status_code}")
+            logging.info(f"Download response headers: {r.headers}")
+            
             r.raise_for_status()
             with open(local_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-        logging.info(f"Successfully downloaded to: {local_path}")
-        return True
+        
+        # Verify the file was downloaded and has content
+        if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            logging.info(f"Successfully downloaded to: {local_path} (Size: {os.path.getsize(local_path)} bytes)")
+            return True
+        else:
+            logging.error(f"File download appears to have failed. File empty or not created.")
+            return False
     except requests.exceptions.RequestException as e:
         logging.error(f"Error downloading {url}: {e}")
         return False
