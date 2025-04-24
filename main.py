@@ -53,7 +53,15 @@ def find_latest_files(url, patterns):
 
     try:
         logging.info(f"Fetching dataset page: {url}")
-        response = requests.get(url, timeout=30)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0'
+        }
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
         logging.info("Successfully fetched page.")
 
@@ -168,7 +176,15 @@ def download_file(url, local_path):
     """Downloads a file from a URL to a local path."""
     try:
         logging.info(f"Downloading file: {url}")
-        with requests.get(url, stream=True, timeout=60) as r:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0'
+        }
+        with requests.get(url, headers=headers, stream=True, timeout=60) as r:
             r.raise_for_status()
             with open(local_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
