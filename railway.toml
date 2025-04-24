@@ -4,6 +4,7 @@ buildCommand = "pip install -e ."
 
 [deploy]
 startCommand = "bash -c './run_datasette.sh'"
+preDeployCommand = "python main.py"
 healthcheckPath = "/"
 healthcheckTimeout = 100
 restartPolicyType = "ALWAYS"
@@ -11,3 +12,13 @@ restartPolicyMaxRetries = 10
 
 [volumes.data]
 mountPath = "./data"
+
+# Scraper service configuration
+[services.scraper]
+[services.scraper.build]
+builder = "NIXPACKS"
+buildCommand = "pip install -e ."
+
+[services.scraper.deploy]
+startCommand = "python main.py"
+cronSchedule = "0 0 30 * *"
