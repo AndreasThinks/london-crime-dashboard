@@ -1,0 +1,195 @@
+title: London Crime Dashboard
+description: Explore crime data across London boroughs over time
+metadata:
+  source: London Datastore
+  source_url: https://data.london.gov.uk/dataset/recorded_crime_summary
+  updated_at: Monthly on the 30th
+
+filters:
+  - name: borough
+    type: select
+    database: london_crime_data
+    table: crime_borough_combined
+    column: boroughname
+    default: All
+    multiple: false
+    label: Borough
+    
+  - name: crime_type
+    type: select
+    database: london_crime_data
+    table: crime_borough_combined
+    column: majortext
+    default: All
+    multiple: false
+    label: Major Crime Type
+    
+  - name: minor_crime_type
+    type: select
+    database: london_crime_data
+    table: crime_borough_combined
+    column: minortext
+    default: All
+    multiple: false
+    label: Minor Crime Type
+
+charts:
+  - name: crimes_over_time
+    title: Crime Counts Over Time
+    type: line
+    database: london_crime_data
+    query: |
+      WITH dates AS (
+        SELECT DISTINCT date
+        FROM crime_borough_combined
+        ORDER BY date
+      )
+      SELECT 
+        strftime('%Y-%m', dates.date) as month,
+        SUM(CASE WHEN cc.count IS NOT NULL THEN cc.count ELSE 0 END) as crime_count
+      FROM dates
+      LEFT JOIN crime_borough_combined cc ON strftime('%Y-%m', dates.date) = strftime('%Y-%m', cc.date)
+      {% if borough != 'All' %}
+      AND cc.boroughname = :borough
+      {% endif %}
+      {% if crime_type != 'All' %}
+      AND cc.majortext = :crime_type
+      {% endif %}
+      {% if minor_crime_type != 'All' %}
+      AND cc.minortext = :minor_crime_type
+      {% endif %}
+      GROUP BY month
+      ORDER BY month
+    x: month
+    y: crime_count
+    color: "#007bff"
+    
+  - name: top_crime_types
+    title: Top Crime Types
+    type: bar
+    database: london_crime_data
+    query: |
+      SELECT 
+        majortext as crime_type,
+        SUM(count) as total_count
+      FROM crime_borough_combined
+      {% if borough != 'All' or minor_crime_type != 'All' %}
+      WHERE 
+        {% if borough != 'All' %}
+        boroughname = :borough
+        {% endif %}
+        {% if borough != 'All' and minor_crime_type != 'All' %}
+        AND 
+        {% endif %}
+        {% if minor_crime_type != 'All' %}
+        minortext = :minor_crime_type
+        {% endif %}
+      {% endif %}
+      GROUP BY majortext
+      ORDER BY total_count DESC
+      LIMIT 10
+    x: crime_type
+    y: total_count
+    color: "#28a745"
+    
+  - name: borough_comparison
+    title: Crime by Borough
+    type: bar
+    database: london_crime_data
+    query: |
+      SELECT 
+        boroughname,
+        SUM(count) as total_count
+      FROM crime_borough_combined
+      {% if crime_type != 'All' or minor_crime_type != 'All' %}
+      WHERE 
+        {% if crime_type != 'All' %}
+        majortext = :crime_type
+        {% endif %}
+        {% if crime_type != 'All' and minor_crime_type != 'All' %}
+        AND 
+        {% endif %}
+        {% if minor_crime_type != 'All' %}
+        minortext = :minor_crime_type
+        {% endif %}
+      {% endif %}
+      GROUP BY boroughname
+      ORDER BY total_count DESC
+      LIMIT 10
+    x: boroughname
+    y: total_count
+    color: "#dc3545"
+
+tables:
+  - name: recent_trends
+    title: Recent Crime Trends
+    database: london_crime_data
+    query: |
+      WITH recent_months AS (
+        SELECT DISTINCT strftime('%Y-%m', date) as month
+        FROM crime_borough_combined
+        ORDER BY month DESC
+        LIMIT 3
+      )
+      SELECT 
+        boroughname as Borough,
+        majortext as "Major Crime Type",
+        minortext as "Minor Crime Type",
+        SUM(count) as "Total Count",
+        strftime('%Y-%m', date) as Month
+      FROM crime_borough_combined
+      WHERE strftime('%Y-%m', date) IN (SELECT month FROM recent_months)
+      {% if borough != 'All' %}
+      AND boroughname = :borough
+      {% endif %}
+      {% if crime_type != 'All' %}
+      AND majortext = :crime_type
+      {% endif %}
+      {% if minor_crime_type != 'All' %}
+      AND minortext = :minor_crime_type
+      {% endif %}
+      GROUP BY Borough, "Major Crime Type", "Minor Crime Type", Month
+      ORDER BY Month DESC, "Total Count" DESC
+      LIMIT 20
+
+metrics:
+  - name: total_crimes
+    title: Total Crimes
+    database: london_crime_data
+    query: |
+      SELECT SUM(count) as value
+      FROM crime_borough_combined
+      {% if borough != 'All' or crime_type != 'All' or minor_crime_type != 'All' %}
+      WHERE 
+        {% if borough != 'All' %}
+        boroughname = :borough
+        {% endif %}
+        
+        {% if crime_type != 'All' %}
+        {% if borough != 'All' %}
+        AND 
+        {% endif %}
+        majortext = :crime_type
+        {% endif %}
+        
+        {% if minor_crime_type != 'All' %}
+        {% if borough != 'All' or crime_type != 'All' %}
+        AND 
+        {% endif %}
+        minortext = :minor_crime_type
+        {% endif %}
+      {% endif %}
+    
+  - name: boroughs_count
+    title: Number of Boroughs
+    database: london_crime_data
+    query: |
+      SELECT COUNT(DISTINCT boroughname) as value
+      FROM crime_borough_combined
+      
+  - name: crime_types_count
+    title: Crime Categories
+    database: london_crime_data
+    query: |
+      SELECT COUNT(DISTINCT majortext) as value
+      FROM crime_borough_combined

@@ -1,0 +1,140 @@
+{
+  "title": "London Crime Data",
+  "description": "Explore crime data across London boroughs",
+  "license": "ODbL",
+  "license_url": "https://opendatacommons.org/licenses/odbl/",
+  "source": "London Datastore",
+  "source_url": "https://data.london.gov.uk/dataset/recorded_crime_summary",
+  "plugins": {
+    "datasette-dashboards": {
+      "london-crime-dashboard": {
+        "title": "London Crime Dashboard",
+        "description": "Explore crime data across London boroughs over time",
+        "layout": [
+          ["latest-data-date", "total-crimes"],
+          ["crimes-over-time", "crimes-over-time"],
+          ["top-crime-types", "borough-comparison"],
+          ["recent-trends", "recent-trends"]
+        ],
+        "filters": {
+          "borough": {
+            "name": "Borough",
+            "type": "select",
+            "db": "london_crime_data",
+            "query": "SELECT 'All' as boroughname UNION SELECT DISTINCT boroughname FROM crime_borough_combined ORDER BY boroughname",
+            "default": "All"
+          },
+          "crime_type": {
+            "name": "Major Crime Type",
+            "type": "select",
+            "db": "london_crime_data",
+            "query": "SELECT 'All' as majortext UNION SELECT DISTINCT majortext FROM crime_borough_combined ORDER BY majortext",
+            "default": "All"
+          },
+          "minor_crime_type": {
+            "name": "Minor Crime Type",
+            "type": "select",
+            "db": "london_crime_data",
+            "query": "SELECT 'All' as minortext UNION SELECT DISTINCT minortext FROM crime_borough_combined ORDER BY minortext",
+            "default": "All"
+          },
+          "date_start": {
+            "name": "Start Date",
+            "type": "date",
+            "default": "2010-04-01"
+          },
+          "date_end": {
+            "name": "End Date",
+            "type": "date",
+            "default": "2025-03-01"
+          }
+        },
+        "charts": {
+          "latest-data-date": {
+            "title": "Latest Data Date",
+            "db": "london_crime_data",
+            "query": "SELECT strftime('%Y-%m-%d', MAX(date)) as value FROM crime_borough_combined",
+            "library": "metric",
+            "display": {
+              "field": "value",
+              "prefix": "Data updated through: "
+            }
+          },
+          "total-crimes": {
+            "title": "Total Crimes",
+            "db": "london_crime_data",
+            "query": "SELECT SUM(count) as value FROM crime_borough_combined WHERE 1=1 [[ AND (boroughname = :borough OR :borough = 'All') ]] [[ AND (majortext = :crime_type OR :crime_type = 'All') ]] [[ AND (minortext = :minor_crime_type OR :minor_crime_type = 'All') ]] [[ AND date >= date(:date_start) ]] [[ AND date <= date(:date_end) ]]",
+            "library": "metric",
+            "display": {
+              "field": "value"
+            }
+          },
+          "crimes-over-time": {
+            "title": "Crime Counts Over Time",
+            "db": "london_crime_data",
+            "query": "SELECT strftime('%Y-%m', date) as month, SUM(count) as crime_count FROM crime_borough_combined WHERE 1=1 [[ AND (boroughname = :borough OR :borough = 'All') ]] [[ AND (majortext = :crime_type OR :crime_type = 'All') ]] [[ AND (minortext = :minor_crime_type OR :minor_crime_type = 'All') ]] [[ AND date >= date(:date_start) ]] [[ AND date <= date(:date_end) ]] GROUP BY month ORDER BY month",
+            "library": "vega-lite",
+            "display": {
+              "mark": {"type": "line", "tooltip": true, "point": true},
+              "encoding": {
+                "x": {"field": "month", "type": "temporal", "title": "Month", "axis": {"format": "%b %Y"}},
+                "y": {"field": "crime_count", "type": "quantitative", "title": "Crime Count"}
+              },
+              "width": "container",
+              "height": 300
+            }
+          },
+          "top-crime-types": {
+            "title": "Top Crime Types",
+            "db": "london_crime_data",
+            "query": "SELECT majortext as crime_type, SUM(count) as total_count FROM crime_borough_combined WHERE 1=1 [[ AND (boroughname = :borough OR :borough = 'All') ]] [[ AND (minortext = :minor_crime_type OR :minor_crime_type = 'All') ]] [[ AND date >= date(:date_start) ]] [[ AND date <= date(:date_end) ]] GROUP BY majortext ORDER BY total_count DESC LIMIT 10",
+            "library": "vega-lite",
+            "display": {
+              "mark": {"type": "bar", "tooltip": true},
+              "encoding": {
+                "x": {"field": "crime_type", "type": "nominal", "title": "Crime Type", "sort": "-y"},
+                "y": {"field": "total_count", "type": "quantitative", "title": "Total Count"}
+              },
+              "width": "container",
+              "height": 300
+            }
+          },
+          "borough-comparison": {
+            "title": "Crime by Borough",
+            "db": "london_crime_data",
+            "query": "SELECT boroughname, SUM(count) as total_count FROM crime_borough_combined WHERE 1=1 [[ AND (majortext = :crime_type OR :crime_type = 'All') ]] [[ AND (minortext = :minor_crime_type OR :minor_crime_type = 'All') ]] [[ AND date >= date(:date_start) ]] [[ AND date <= date(:date_end) ]] GROUP BY boroughname ORDER BY total_count DESC LIMIT 10",
+            "library": "vega-lite",
+            "display": {
+              "mark": {"type": "bar", "tooltip": true},
+              "encoding": {
+                "x": {"field": "boroughname", "type": "nominal", "title": "Borough", "sort": "-y"},
+                "y": {"field": "total_count", "type": "quantitative", "title": "Total Count"}
+              },
+              "width": "container",
+              "height": 300
+            }
+          },
+          "recent-trends": {
+            "title": "Recent Crime Trends",
+            "db": "london_crime_data",
+            "query": "WITH recent_months AS (SELECT DISTINCT strftime('%Y-%m', date) as month FROM crime_borough_combined WHERE date >= date(:date_start) AND date <= date(:date_end) ORDER BY month DESC LIMIT 3) SELECT boroughname as Borough, majortext as 'Major Crime Type', minortext as 'Minor Crime Type', SUM(count) as 'Total Count', strftime('%Y-%m', date) as Month FROM crime_borough_combined WHERE strftime('%Y-%m', date) IN (SELECT month FROM recent_months) AND 1=1 [[ AND (boroughname = :borough OR :borough = 'All') ]] [[ AND (majortext = :crime_type OR :crime_type = 'All') ]] [[ AND (minortext = :minor_crime_type OR :minor_crime_type = 'All') ]] GROUP BY Borough, 'Major Crime Type', 'Minor Crime Type', Month ORDER BY Month DESC, 'Total Count' DESC LIMIT 20",
+            "library": "table"
+          }
+        }
+      }
+    }
+  },
+  "databases": {
+    "london_crime_data": {
+      "tables": {
+        "crime_borough_combined": {
+          "title": "London Borough Crime Data",
+          "description": "Combined and aggregated crime data at the borough level",
+          "sort_desc": "date",
+          "facets": ["boroughname", "majortext", "minortext"]
+        }
+      },
+      "hidden_tables": ["crime_borough_historical", "crime_lsoa", "crime_ward"]
+    }
+  }
+}

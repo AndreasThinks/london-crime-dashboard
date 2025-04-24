@@ -1,0 +1,13 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -e ."
+
+[deploy]
+startCommand = "bash -c './run_datasette.sh'"
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 10
+
+[volumes.data]
+mountPath = "./data"
