@@ -208,10 +208,53 @@ def setup_selenium_driver(download_dir=None):
                                     
                                     # Try again with the fixed permissions
                                     logging.info("Retrying with fixed chromedriver permissions...")
-                                    driver = uc.Chrome()
-                                    logging.info("Successfully created driver after fixing permissions")
+                                    try:
+                                        # Try with no options first
+                                        driver = uc.Chrome()
+                                        logging.info("Successfully created driver after fixing permissions")
+                                    except Exception as retry_e:
+                                        logging.error(f"Retry failed after fixing permissions: {retry_e}")
+                                        # Try with a specific Chrome version
+                                        logging.info("Trying with explicit Chrome version...")
+                                        driver = uc.Chrome(version_main=114)  # Try with a common version
                                 else:
                                     logging.error("Could not find chromedriver executable")
+                                    
+                                    # Try to download and install chromedriver directly
+                                    logging.info("Attempting to download and install chromedriver directly...")
+                                    try:
+                                        import subprocess
+                                        # Create directory if it doesn't exist
+                                        os.makedirs("/root/.local/share/undetected_chromedriver", exist_ok=True)
+                                        
+                                        # Download chromedriver
+                                        subprocess.run([
+                                            "wget", "-O", "/tmp/chromedriver.zip", 
+                                            "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
+                                        ], check=True)
+                                        
+                                        # Unzip
+                                        subprocess.run(["unzip", "-o", "/tmp/chromedriver.zip", "-d", "/tmp"], check=True)
+                                        
+                                        # Move to the right location
+                                        subprocess.run([
+                                            "mv", "/tmp/chromedriver", 
+                                            "/root/.local/share/undetected_chromedriver/undetected_chromedriver"
+                                        ], check=True)
+                                        
+                                        # Make executable
+                                        subprocess.run([
+                                            "chmod", "+x", 
+                                            "/root/.local/share/undetected_chromedriver/undetected_chromedriver"
+                                        ], check=True)
+                                        
+                                        logging.info("Successfully downloaded and installed chromedriver")
+                                        
+                                        # Try again with the manually installed chromedriver
+                                        driver = uc.Chrome(version_main=114)
+                                        logging.info("Successfully created driver with manually installed chromedriver")
+                                    except Exception as install_driver_e:
+                                        logging.error(f"Failed to install chromedriver manually: {install_driver_e}")
                             except Exception as perm_e:
                                 logging.error(f"Failed to fix chromedriver permissions: {perm_e}")
                         
