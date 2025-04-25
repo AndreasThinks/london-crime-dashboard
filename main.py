@@ -145,8 +145,29 @@ def setup_selenium_driver(download_dir=None):
             logging.warning("No Chrome binary found in common locations. Letting undetected_chromedriver auto-detect.")
         
         try:
-            # Use undetected_chromedriver with explicit options
-            driver = uc.Chrome(options=options)
+            # Try to set the version_main parameter to match the installed Chrome version
+            import subprocess
+            try:
+                # Get Chrome version
+                if chrome_binary and os.path.exists(chrome_binary):
+                    version_cmd = f"{chrome_binary} --version"
+                    version_output = subprocess.check_output(version_cmd, shell=True, stderr=subprocess.STDOUT, text=True)
+                    # Parse version string like "Chromium 114.0.5735.198 snap"
+                    import re
+                    version_match = re.search(r'(\d+)\.', version_output)
+                    if version_match:
+                        version_main = int(version_match.group(1))
+                        logging.info(f"Detected Chrome version: {version_main} from '{version_output.strip()}'")
+                        # Use undetected_chromedriver with explicit options and version
+                        driver = uc.Chrome(options=options, version_main=version_main)
+                    else:
+                        logging.warning(f"Could not parse Chrome version from: {version_output}")
+                        driver = uc.Chrome(options=options)
+                else:
+                    driver = uc.Chrome(options=options)
+            except Exception as version_e:
+                logging.warning(f"Error getting Chrome version: {version_e}. Proceeding without version specification.")
+                driver = uc.Chrome(options=options)
         except Exception as e:
             if "Binary Location Must be a String" in str(e):
                 logging.warning("Binary location error. Trying with minimal options...")
@@ -169,6 +190,30 @@ def setup_selenium_driver(download_dir=None):
                         logging.info("Successfully created driver with no options")
                     except Exception as final_e:
                         logging.error(f"Final attempt failed: {final_e}")
+                        
+                        # Check if the error is related to the chromedriver executable
+                        if "chromedriver" in str(final_e) and ("not found" in str(final_e) or "permission" in str(final_e) or "127" in str(final_e)):
+                            logging.warning("The error appears to be related to the chromedriver executable. Attempting to fix...")
+                            try:
+                                # Try to find the chromedriver path
+                                import glob
+                                chromedriver_paths = glob.glob("/root/.local/share/undetected_chromedriver/undetected_chromedriver*")
+                                if chromedriver_paths:
+                                    for path in chromedriver_paths:
+                                        logging.info(f"Found chromedriver at: {path}")
+                                        # Make it executable
+                                        import subprocess
+                                        subprocess.run(['chmod', '+x', path], check=True)
+                                        logging.info(f"Made chromedriver executable: {path}")
+                                    
+                                    # Try again with the fixed permissions
+                                    logging.info("Retrying with fixed chromedriver permissions...")
+                                    driver = uc.Chrome()
+                                    logging.info("Successfully created driver after fixing permissions")
+                                else:
+                                    logging.error("Could not find chromedriver executable")
+                            except Exception as perm_e:
+                                logging.error(f"Failed to fix chromedriver permissions: {perm_e}")
                         
                         # Check if Chrome is installed at all
                         try:
