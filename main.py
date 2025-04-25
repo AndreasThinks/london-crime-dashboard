@@ -96,7 +96,9 @@ def setup_selenium_driver(download_dir=None):
             '/usr/bin/chromium',
             '/usr/bin/chromium-browser',
             '/snap/bin/chromium',
-            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'  # macOS
+            '/usr/bin/chromium-browser-stable',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  # macOS
+            '/opt/google/chrome/chrome'  # Another common Linux location
         ]
         
         for path in possible_paths:
@@ -105,8 +107,13 @@ def setup_selenium_driver(download_dir=None):
                 logging.info(f"Found Chrome binary at: {chrome_binary}")
                 break
         
-        if chrome_binary:
+        # Only set binary_location if we actually found a valid path
+        # This avoids setting it to None which can cause the "Binary Location Must be a String" error
+        if chrome_binary and isinstance(chrome_binary, str):
+            logging.info(f"Setting binary_location to: {chrome_binary}")
             options.binary_location = chrome_binary
+        else:
+            logging.warning("No Chrome binary found in common locations. Letting undetected_chromedriver auto-detect.")
         
         try:
             # Use undetected_chromedriver with explicit options
@@ -118,8 +125,22 @@ def setup_selenium_driver(download_dir=None):
                 simple_options = uc.ChromeOptions()
                 simple_options.add_argument("--headless")
                 simple_options.add_argument("--no-sandbox")
-                driver = uc.Chrome(options=simple_options)
-                logging.info("Successfully created driver with minimal options")
+                
+                # Don't set binary_location at all in the fallback options
+                # This lets undetected_chromedriver try to find Chrome on its own
+                try:
+                    driver = uc.Chrome(options=simple_options)
+                    logging.info("Successfully created driver with minimal options")
+                except Exception as nested_e:
+                    logging.error(f"Fallback also failed: {nested_e}")
+                    # Try one more approach with no options at all
+                    try:
+                        logging.warning("Attempting with no options at all...")
+                        driver = uc.Chrome()
+                        logging.info("Successfully created driver with no options")
+                    except Exception as final_e:
+                        logging.error(f"Final attempt failed: {final_e}")
+                        raise
             else:
                 # Re-raise if it's not the binary location error
                 raise
