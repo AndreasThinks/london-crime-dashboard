@@ -20,5 +20,5 @@ builder = "NIXPACKS"
 buildCommand = "pip install -e ."
 
 [services.scraper.deploy]
-startCommand = "python main.py"
+startCommand = "bash -c 'chmod +x install_chrome.sh && ./install_chrome.sh && python main.py'"
 cronSchedule = "0 0 30 * *"

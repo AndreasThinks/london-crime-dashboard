@@ -91,14 +91,15 @@ def setup_selenium_driver(download_dir=None):
         # Try to find Chrome binary in common locations
         chrome_binary = None
         possible_paths = [
+            # Railway and other container environments
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
             '/usr/bin/google-chrome',
             '/usr/bin/google-chrome-stable',
-            '/usr/bin/chromium',
-            '/usr/bin/chromium-browser',
             '/snap/bin/chromium',
             '/usr/bin/chromium-browser-stable',
+            '/opt/google/chrome/chrome',  # Another common Linux location
             '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  # macOS
-            '/opt/google/chrome/chrome'  # Another common Linux location
         ]
         
         for path in possible_paths:
@@ -140,6 +141,49 @@ def setup_selenium_driver(download_dir=None):
                         logging.info("Successfully created driver with no options")
                     except Exception as final_e:
                         logging.error(f"Final attempt failed: {final_e}")
+                        
+                        # Check if Chrome is installed at all
+                        try:
+                            import subprocess
+                            result = subprocess.run(['which', 'chromium-browser'], capture_output=True, text=True)
+                            if result.stdout:
+                                logging.info(f"Found chromium-browser at: {result.stdout.strip()}")
+                            else:
+                                result = subprocess.run(['which', 'google-chrome'], capture_output=True, text=True)
+                                if result.stdout:
+                                    logging.info(f"Found google-chrome at: {result.stdout.strip()}")
+                                else:
+                                    logging.critical("No Chrome or Chromium browser found on the system. Attempting to install...")
+                                    try:
+                                        # Try to install Chrome using our script
+                                        import subprocess
+                                        install_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'install_chrome.sh')
+                                        if os.path.exists(install_script):
+                                            logging.info(f"Running Chrome installation script: {install_script}")
+                                            install_result = subprocess.run(['sudo', 'bash', install_script], capture_output=True, text=True)
+                                            logging.info(f"Installation script stdout: {install_result.stdout}")
+                                            if install_result.stderr:
+                                                logging.warning(f"Installation script stderr: {install_result.stderr}")
+                                            
+                                            if install_result.returncode == 0:
+                                                logging.info("Chrome/Chromium installed successfully. Retrying WebDriver setup.")
+                                                # Try to find Chrome binary again after installation
+                                                for path in possible_paths:
+                                                    if os.path.exists(path):
+                                                        chrome_binary = path
+                                                        logging.info(f"Found Chrome binary at: {chrome_binary} after installation")
+                                                        break
+                                            else:
+                                                logging.error("Chrome installation failed.")
+                                        else:
+                                            logging.error(f"Installation script not found at {install_script}")
+                                    except Exception as install_e:
+                                        logging.error(f"Error during Chrome installation: {install_e}")
+                                    
+                                    logging.critical("Chrome/Chromium is required but could not be installed or found.")
+                        except Exception as check_e:
+                            logging.error(f"Error checking for Chrome installation: {check_e}")
+                        
                         raise
             else:
                 # Re-raise if it's not the binary location error
