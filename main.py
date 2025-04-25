@@ -90,17 +90,42 @@ def setup_selenium_driver(download_dir=None):
         
         # Try to find Chrome binary in common locations
         chrome_binary = None
-        possible_paths = [
-            # Railway and other container environments
-            '/usr/bin/chromium-browser',
-            '/usr/bin/chromium',
-            '/usr/bin/google-chrome',
-            '/usr/bin/google-chrome-stable',
-            '/snap/bin/chromium',
-            '/usr/bin/chromium-browser-stable',
-            '/opt/google/chrome/chrome',  # Another common Linux location
-            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  # macOS
-        ]
+        
+        # First check if Chrome/Chromium is in PATH
+        import subprocess
+        try:
+            chrome_in_path = subprocess.run(['which', 'chromium-browser'], capture_output=True, text=True)
+            if chrome_in_path.stdout.strip():
+                chrome_binary = chrome_in_path.stdout.strip()
+                logging.info(f"Found chromium-browser in PATH: {chrome_binary}")
+        except Exception:
+            pass
+            
+        if not chrome_binary:
+            try:
+                chrome_in_path = subprocess.run(['which', 'google-chrome'], capture_output=True, text=True)
+                if chrome_in_path.stdout.strip():
+                    chrome_binary = chrome_in_path.stdout.strip()
+                    logging.info(f"Found google-chrome in PATH: {chrome_binary}")
+            except Exception:
+                pass
+        
+        # If not found in PATH, check common locations
+        if not chrome_binary:
+            possible_paths = [
+                # Railway and other container environments
+                '/usr/bin/chromium-browser',
+                '/usr/bin/chromium',
+                '/usr/bin/google-chrome',
+                '/usr/bin/google-chrome-stable',
+                '/snap/bin/chromium',
+                '/usr/bin/chromium-browser-stable',
+                '/opt/google/chrome/chrome',  # Another common Linux location
+                '/opt/google/chrome/google-chrome',  # Another possible location
+                '/usr/local/bin/chromium-browser',
+                '/usr/local/bin/google-chrome',
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  # macOS
+            ]
         
         for path in possible_paths:
             if os.path.exists(path):
