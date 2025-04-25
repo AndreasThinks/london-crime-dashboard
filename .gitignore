@@ -16,6 +16,10 @@ ENV/
 *.db
 data/*.db
 
+
+# debug files
+debug_page*
+
 # Temporary download directories
 temp_downloads/
 
