@@ -4,7 +4,7 @@ buildCommand = "pip install -e ."
 
 [deploy]
 startCommand = "bash -c './run_datasette.sh'"
-preDeployCommand = "python main.py"
+preDeployCommand = "bash -c 'chmod +x install_chrome.sh && ./install_chrome.sh && python main.py'"
 healthcheckPath = "/"
 healthcheckTimeout = 100
 restartPolicyType = "ALWAYS"

@@ -160,7 +160,13 @@ def setup_selenium_driver(download_dir=None):
                                         install_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'install_chrome.sh')
                                         if os.path.exists(install_script):
                                             logging.info(f"Running Chrome installation script: {install_script}")
-                                            install_result = subprocess.run(['sudo', 'bash', install_script], capture_output=True, text=True)
+                                            # Check if we have sudo access
+                                            sudo_available = subprocess.run(['which', 'sudo'], capture_output=True, text=True).returncode == 0
+                                            if sudo_available:
+                                                install_result = subprocess.run(['sudo', 'bash', install_script], capture_output=True, text=True)
+                                            else:
+                                                # No sudo, try to run as current user (might work if we're root)
+                                                install_result = subprocess.run(['bash', install_script], capture_output=True, text=True)
                                             logging.info(f"Installation script stdout: {install_result.stdout}")
                                             if install_result.stderr:
                                                 logging.warning(f"Installation script stderr: {install_result.stderr}")

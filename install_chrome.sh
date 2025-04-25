@@ -13,18 +13,26 @@ fi
 
 echo "Chrome/Chromium not found. Installing Chromium..."
 
+# Check if we have sudo access
+if command -v sudo &> /dev/null; then
+    SUDO="sudo"
+else
+    # No sudo, try to run as current user (might work if we're root)
+    SUDO=""
+fi
+
 # Update package lists
-apt-get update
+$SUDO apt-get update
 
 # Install dependencies
-apt-get install -y --no-install-recommends \
+$SUDO apt-get install -y --no-install-recommends \
     wget \
     gnupg \
     ca-certificates \
     apt-transport-https
 
 # Install Chromium (more lightweight than Chrome)
-apt-get install -y --no-install-recommends chromium-browser
+$SUDO apt-get install -y --no-install-recommends chromium-browser
 
 # Verify installation
 if command -v chromium-browser &> /dev/null; then
@@ -34,14 +42,14 @@ else
     echo "Failed to install Chromium. Trying Google Chrome..."
     
     # Add Google Chrome repository
-    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | $SUDO apt-key add -
+    $SUDO bash -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list'
     
     # Update package lists again
-    apt-get update
+    $SUDO apt-get update
     
     # Install Google Chrome
-    apt-get install -y --no-install-recommends google-chrome-stable
+    $SUDO apt-get install -y --no-install-recommends google-chrome-stable
     
     # Verify installation
     if command -v google-chrome &> /dev/null; then
