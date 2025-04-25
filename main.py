@@ -88,6 +88,24 @@ def setup_selenium_driver(download_dir=None):
     try:
         logging.info("Initializing undetected-chromedriver (attempting auto-version detection)...")
         
+        # Define possible paths for Chrome/Chromium binaries
+        possible_paths = [
+            # Railway and other container environments
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/snap/bin/chromium',
+            '/usr/bin/chromium-browser-stable',
+            '/opt/google/chrome/chrome',  # Another common Linux location
+            '/opt/google/chrome/google-chrome',  # Another possible location
+            '/usr/local/bin/chromium-browser',
+            '/usr/local/bin/google-chrome',
+            '/bin/chromium-browser',  # Found in Railway environment
+            '/bin/google-chrome',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  # macOS
+        ]
+        
         # Try to find Chrome binary in common locations
         chrome_binary = None
         
@@ -112,26 +130,11 @@ def setup_selenium_driver(download_dir=None):
         
         # If not found in PATH, check common locations
         if not chrome_binary:
-            possible_paths = [
-                # Railway and other container environments
-                '/usr/bin/chromium-browser',
-                '/usr/bin/chromium',
-                '/usr/bin/google-chrome',
-                '/usr/bin/google-chrome-stable',
-                '/snap/bin/chromium',
-                '/usr/bin/chromium-browser-stable',
-                '/opt/google/chrome/chrome',  # Another common Linux location
-                '/opt/google/chrome/google-chrome',  # Another possible location
-                '/usr/local/bin/chromium-browser',
-                '/usr/local/bin/google-chrome',
-                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',  # macOS
-            ]
-        
-        for path in possible_paths:
-            if os.path.exists(path):
-                chrome_binary = path
-                logging.info(f"Found Chrome binary at: {chrome_binary}")
-                break
+            for path in possible_paths:
+                if os.path.exists(path):
+                    chrome_binary = path
+                    logging.info(f"Found Chrome binary at: {chrome_binary}")
+                    break
         
         # Only set binary_location if we actually found a valid path
         # This avoids setting it to None which can cause the "Binary Location Must be a String" error
