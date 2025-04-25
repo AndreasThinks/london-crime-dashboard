@@ -60,7 +60,7 @@ def setup_selenium_driver(download_dir=None):
     """
     options = uc.ChromeOptions()
     # Headless mode can sometimes be detected, try running with a head first if issues persist
-    # options.add_argument("--headless") # Comment out if running headlessly causes issues
+    options.add_argument("--headless") # Enable headless mode for deployment
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -87,8 +87,42 @@ def setup_selenium_driver(download_dir=None):
     driver = None
     try:
         logging.info("Initializing undetected-chromedriver (attempting auto-version detection)...")
-        # Use undetected_chromedriver - REMOVED version_main to allow auto-detection
-        driver = uc.Chrome(options=options)
+        
+        # Try to find Chrome binary in common locations
+        chrome_binary = None
+        possible_paths = [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/snap/bin/chromium',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'  # macOS
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                chrome_binary = path
+                logging.info(f"Found Chrome binary at: {chrome_binary}")
+                break
+        
+        if chrome_binary:
+            options.binary_location = chrome_binary
+        
+        try:
+            # Use undetected_chromedriver with explicit options
+            driver = uc.Chrome(options=options)
+        except Exception as e:
+            if "Binary Location Must be a String" in str(e):
+                logging.warning("Binary location error. Trying with minimal options...")
+                # Try with minimal options as a fallback
+                simple_options = uc.ChromeOptions()
+                simple_options.add_argument("--headless")
+                simple_options.add_argument("--no-sandbox")
+                driver = uc.Chrome(options=simple_options)
+                logging.info("Successfully created driver with minimal options")
+            else:
+                # Re-raise if it's not the binary location error
+                raise
 
         # Further attempt to hide webdriver status
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
