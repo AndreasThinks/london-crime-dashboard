@@ -1,16 +1,22 @@
 
-import requests
-import cloudscraper  # Add cloudscraper import
-import httpx  # Add httpx for HTTP/2 support
-from bs4 import BeautifulSoup
 import pandas as pd
 import sqlite3
 from datetime import datetime
 import os
 import logging
 import re
+import time
 from urllib.parse import urljoin, unquote, urlparse
 from dateutil.parser import parse as parse_date # For flexible date parsing if needed
+from bs4 import BeautifulSoup
+
+# Selenium imports
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # --- Configuration ---
 DATASET_URL = "https://data.london.gov.uk/dataset/recorded_crime_summary"
@@ -36,9 +42,48 @@ logging.basicConfig(level=logging.INFO,
 
 # --- Helper Functions ---
 
+def setup_selenium_driver(download_dir=None):
+    """
+    Set up a Selenium Chrome WebDriver with appropriate options.
+    
+    Args:
+        download_dir (str, optional): Directory to save downloaded files.
+        
+    Returns:
+        WebDriver: Configured Chrome WebDriver instance.
+    """
+    options = Options()
+    options.add_argument("--headless")  # Run in headless mode (no GUI)
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    
+    # Add user agent to appear more like a real browser
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
+    # Configure download behavior if download_dir is provided
+    if download_dir:
+        prefs = {
+            "download.default_directory": os.path.abspath(download_dir),
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": False,
+            "plugins.always_open_pdf_externally": True
+        }
+        options.add_experimental_option("prefs", prefs)
+    
+    # Initialize the Chrome WebDriver
+    driver = webdriver.Chrome(options=options)
+    
+    # Set page load timeout
+    driver.set_page_load_timeout(30)
+    
+    return driver
+
 def find_latest_files(url, patterns):
     """
-    Scrapes the page to find the most recent download links for files matching the patterns.
+    Scrapes the page using Selenium to find the most recent download links for files matching the patterns.
 
     Args:
         url (str): The URL of the dataset page.
@@ -52,92 +97,60 @@ def find_latest_files(url, patterns):
     """
     latest_files = {key: None for key in patterns.keys()}
     max_dates = {key: datetime.min for key in patterns.keys()} # Store latest date found for each type
+    driver = None
 
     try:
-        logging.info(f"Fetching dataset page: {url}")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Cache-Control': 'max-age=0',
-            'Referer': 'https://data.london.gov.uk/'
-        }
+        logging.info(f"Fetching dataset page with Selenium: {url}")
         
-        # Try with HTTP/2 client
-        logging.info("Creating HTTP/2 client...")
-        client = httpx.Client(http2=True, follow_redirects=True)
+        # Initialize the Chrome WebDriver
+        driver = setup_selenium_driver()
         
         # First visit the main site to get cookies
-        try:
-            logging.info("Visiting main site to get cookies with HTTP/2...")
-            client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
-        except Exception as e:
-            logging.warning(f"Error visiting main site with HTTP/2: {e}")
-            # Fall back to cloudscraper if HTTP/2 fails
-            logging.info("Falling back to cloudscraper...")
-            client = cloudscraper.create_scraper()
-            try:
-                client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
-            except Exception as e:
-                logging.warning(f"Error visiting main site with cloudscraper: {e}")
+        logging.info("Visiting main site to get cookies...")
+        driver.get('https://data.london.gov.uk/')
+        time.sleep(3)  # Wait for cookies to be set
         
-        # Now try to get the dataset page
+        # Now navigate to the dataset page
         logging.info("Now trying to access the dataset page...")
-        response = client.get(url, headers=headers, timeout=30)
+        driver.get(url)
         
-        # Log response details for debugging
-        logging.info(f"Response status code: {response.status_code}")
-        logging.info(f"Response headers: {response.headers}")
+        # Wait for the page to load completely
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.dp-container"))
+        )
         
-        if response.status_code == 403:
-            # If we get a 403, try a different approach - direct download of known files
-            logging.warning("Got 403 Forbidden, trying alternative approach...")
-            return {
-                "borough": ("https://data.london.gov.uk/download/recorded_crime_summary/3cdda2b7-b56f-4f21-b8f1-a8cfd7da3bf5/MPS%20Borough%20Level%20Crime%20%28Historical%29.csv", 
-                           datetime.now(), 
-                           "MPS Borough Level Crime (Historical).csv"),
-                "lsoa": ("https://data.london.gov.uk/download/recorded_crime_summary/6ad2ca14-1b76-46f3-9750-d71eb391f256/MPS%20LSOA%20Level%20Crime%20%28most%20recent%2024%20months%29.csv",
-                        datetime.now(),
-                        "MPS LSOA Level Crime.csv"),
-                "ward": ("https://data.london.gov.uk/download/recorded_crime_summary/2e0e8c8d-ef45-4e7a-b10a-d3faa0f1597a/MPS%20Ward%20Level%20Crime%20%28most%20recent%2024%20months%29.csv",
-                        datetime.now(),
-                        "MPS Ward Level Crime.csv")
-            }
-        
-        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        # Log success
         logging.info("Successfully fetched page.")
-
-        soup = BeautifulSoup(response.content, 'html.parser')
-
-        # Find resource items (adjust selector if website structure changes)
+        
+        # Get the page source and parse with BeautifulSoup
+        page_source = driver.page_source
+        soup = BeautifulSoup(page_source, 'html.parser')
+        
+        # Find resource items
         resource_items = soup.find_all('div', class_='dp-container')
         logging.info(f"Found {len(resource_items)} potential resource items.")
-
+        
         if not resource_items:
-             logging.warning("No resource items found. The page structure might have changed.")
-             return latest_files # Return empty dict
-
+            logging.warning("No resource items found. The page structure might have changed.")
+            return latest_files  # Return empty dict
+            
         for item in resource_items:
             link_tag = item.find('a', class_='dp-resource__format')
-            title_tag = item.find('div', class_='dp-resource__title') # Often filename is here
-
+            title_tag = item.find('div', class_='dp-resource__title')  # Often filename is here
+            
             if not link_tag or not title_tag:
-                # logging.debug("Skipping item: Missing link or title tag.")
                 continue
-
+                
             file_url = link_tag.get('href')
-
+            
             # Ensure the URL is absolute
             if file_url and not file_url.startswith(('http://', 'https://')):
-                 file_url = urljoin(url, file_url) # Make URL absolute relative to the base page URL
-
+                file_url = urljoin(url, file_url)  # Make URL absolute relative to the base page URL
+                
             if not file_url:
-                logging.debug("Skipping item: Missing file URL.")
                 continue
-
-            # --- Extract filename from URL ---
+                
+            # Extract filename from URL
             try:
                 parsed_url = urlparse(file_url)
                 # Get the last part of the path and decode URL encoding (e.g., %20 -> space)
@@ -145,19 +158,17 @@ def find_latest_files(url, patterns):
             except Exception as e:
                 logging.warning(f"Could not parse filename from URL {file_url}: {e}")
                 continue
-
+                
             if not filename_from_url or not filename_from_url.lower().endswith('.csv'):
-                logging.debug(f"Skipping item: Not a CSV link based on URL filename ({filename_from_url}).")
                 continue
-            # --- End filename extraction ---
-
+                
             # For historical files, we want to prioritize them regardless of date
             is_historical = False
             if "historical" in filename_from_url.lower() or "(historical)" in filename_from_url.lower():
                 is_historical = True
                 logging.info(f"Found historical file: {filename_from_url}")
-
-            # --- Revised Date Parsing ---
+                
+            # Date Parsing
             parsed_end_date = None
             dates_divs = item.find_all('div', class_='dp-temporalcoverage')
             for date_div in dates_divs:
@@ -167,101 +178,127 @@ def find_latest_files(url, patterns):
                     date_parts = date_text.split("To")
                     if len(date_parts) == 2:
                         try:
-                            date_string = date_parts[1].strip().split()[0] # Get the 'dd/mm/yyyy' part
+                            date_string = date_parts[1].strip().split()[0]  # Get the 'dd/mm/yyyy' part
                             parsed_end_date = datetime.strptime(date_string, '%d/%m/%Y')
-                            logging.debug(f"Parsed date '{parsed_end_date.strftime('%Y-%m-%d')}' from range: {date_text}")
-                            break # Found and parsed a date, stop looking
+                            break  # Found and parsed a date, stop looking
                         except (ValueError, IndexError):
                             logging.warning(f"Could not parse date range format: '{date_text}'")
-                # Add other potential date formats here if needed (e.g., 'Last updated: ...')
-
+                            
             # If no date was successfully parsed, use current date as fallback
             if parsed_end_date is None:
                 parsed_end_date = datetime.now()
-                logging.warning(f"No valid end date found for resource: {filename_from_url}. Using current date as fallback.")
-
+                
             current_date = parsed_end_date
-            # --- End Revised Date Parsing ---
-
+            
             # Check against target patterns using filename from URL
             for key, pattern in patterns.items():
-                if pattern.match(filename_from_url): # Match against filename from URL
-                    logging.debug(f"Match found for '{key}': {filename_from_url} (Date: {current_date})")
-                    
+                if pattern.match(filename_from_url):  # Match against filename from URL
                     # For historical files, we always want to use them
                     if is_historical and "borough" in key:
                         logging.info(f"Selected historical file for '{key}': {filename_from_url}")
                         latest_files[key] = (file_url, current_date, filename_from_url)
                         break
-                    
+                        
                     # For non-historical files, use the most recent one
                     if current_date > max_dates[key]:
                         logging.info(f"Found newer file for '{key}': {filename_from_url} (Date: {current_date})")
                         max_dates[key] = current_date
                         # Store the filename derived from the URL
                         latest_files[key] = (file_url, current_date, filename_from_url)
-                    break # Move to next item once matched
-
-    except (httpx.RequestError, httpx.HTTPStatusError) as e:
-        logging.error(f"Error fetching URL {url}: {e}")
-        return None # Indicate failure
+                    break  # Move to next item once matched
+                    
+    except TimeoutException:
+        logging.error("Timeout while loading the dataset page")
+        return None  # Indicate failure
     except Exception as e:
         logging.error(f"An error occurred during scraping: {e}")
-        return None # Indicate failure
-
-    # Verify all files were found
-    for key, file_info in latest_files.items():
-        if file_info is None:
-            logging.warning(f"Could not find a suitable file matching pattern for '{key}'.")
-
+        return None  # Indicate failure
+    finally:
+        # Always close the browser to free resources
+        if driver:
+            driver.quit()
+            
+    # If we couldn't find the files, use direct URLs as fallback
+    if not all(latest_files.values()):
+        logging.warning("Some files were not found, using fallback direct URLs")
+        # Fill in missing files with direct URLs
+        if latest_files["borough"] is None:
+            latest_files["borough"] = ("https://data.london.gov.uk/download/recorded_crime_summary/3cdda2b7-b56f-4f21-b8f1-a8cfd7da3bf5/MPS%20Borough%20Level%20Crime%20%28Historical%29.csv", 
+                                      datetime.now(), 
+                                      "MPS Borough Level Crime (Historical).csv")
+        if latest_files["lsoa"] is None:
+            latest_files["lsoa"] = ("https://data.london.gov.uk/download/recorded_crime_summary/6ad2ca14-1b76-46f3-9750-d71eb391f256/MPS%20LSOA%20Level%20Crime%20%28most%20recent%2024%20months%29.csv",
+                                   datetime.now(),
+                                   "MPS LSOA Level Crime.csv")
+        if latest_files["ward"] is None:
+            latest_files["ward"] = ("https://data.london.gov.uk/download/recorded_crime_summary/2e0e8c8d-ef45-4e7a-b10a-d3faa0f1597a/MPS%20Ward%20Level%20Crime%20%28most%20recent%2024%20months%29.csv",
+                                   datetime.now(),
+                                   "MPS Ward Level Crime.csv")
+            
     return latest_files
 
 def download_file(url, local_path):
-    """Downloads a file from a URL to a local path."""
-    try:
-        logging.info(f"Downloading file: {url}")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Cache-Control': 'max-age=0',
-            'Referer': 'https://data.london.gov.uk/'
-        }
+    """
+    Downloads a file from a URL to a local path using Selenium to bypass Cloudflare protection.
+    
+    Args:
+        url (str): The URL of the file to download.
+        local_path (str): The local path where the file should be saved.
         
-        # Try with HTTP/2 client first
-        logging.info("Creating HTTP/2 client for download...")
-        client = httpx.Client(http2=True, follow_redirects=True)
+    Returns:
+        bool: True if download was successful, False otherwise.
+    """
+    driver = None
+    download_dir = os.path.dirname(os.path.abspath(local_path))
+    filename = os.path.basename(local_path)
+    
+    try:
+        logging.info(f"Downloading file with Selenium: {url}")
+        
+        # Initialize Chrome with download preferences
+        driver = setup_selenium_driver(download_dir=download_dir)
         
         # First visit the main site to get cookies
-        try:
-            logging.info("Visiting main site to get cookies with HTTP/2 before download...")
-            client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
-        except Exception as e:
-            logging.warning(f"Error visiting main site with HTTP/2: {e}")
-            # Fall back to cloudscraper if HTTP/2 fails
-            logging.info("Falling back to cloudscraper for download...")
-            client = cloudscraper.create_scraper()
-            try:
-                client.get('https://data.london.gov.uk/', headers=headers, timeout=30)
-            except Exception as e:
-                logging.warning(f"Error visiting main site with cloudscraper: {e}")
+        logging.info("Visiting main site to get cookies...")
+        driver.get('https://data.london.gov.uk/')
+        time.sleep(3)  # Wait for cookies to be set
         
-        # Log the download attempt
-        logging.info(f"Attempting to download file with HTTP/2 client...")
+        # Now navigate to the file URL to trigger download
+        logging.info(f"Navigating to file URL: {url}")
+        driver.get(url)
         
-        # Try to download with HTTP/2 client
-        with client.stream("GET", url, headers=headers, timeout=60) as r:
-            # Log response details for debugging
-            logging.info(f"Download response status code: {r.status_code}")
-            logging.info(f"Download response headers: {r.headers}")
+        # Wait for download to complete (max 60 seconds)
+        download_wait_time = 60
+        download_complete = False
+        start_time = time.time()
+        
+        # Check if the file exists in the download directory
+        while not download_complete and time.time() - start_time < download_wait_time:
+            # List files in download directory
+            files = os.listdir(download_dir)
+            csv_files = [f for f in files if f.endswith('.csv') and not f.endswith('.part')]
             
-            r.raise_for_status()
-            with open(local_path, 'wb') as f:
-                for chunk in r.iter_bytes(chunk_size=8192):
-                    f.write(chunk)
-        
+            if csv_files:
+                # Find the most recently modified CSV file
+                latest_file = max(
+                    [os.path.join(download_dir, f) for f in csv_files],
+                    key=os.path.getmtime
+                )
+                
+                # If the file was just downloaded (within the last minute)
+                if time.time() - os.path.getmtime(latest_file) < 60:
+                    # Rename the file if needed
+                    if os.path.basename(latest_file) != os.path.basename(local_path):
+                        os.rename(latest_file, local_path)
+                    download_complete = True
+                    break
+            
+            time.sleep(1)  # Check every second
+            
+        if not download_complete:
+            logging.error(f"Download timed out after {download_wait_time} seconds")
+            return False
+            
         # Verify the file was downloaded and has content
         if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
             logging.info(f"Successfully downloaded to: {local_path} (Size: {os.path.getsize(local_path)} bytes)")
@@ -269,12 +306,17 @@ def download_file(url, local_path):
         else:
             logging.error(f"File download appears to have failed. File empty or not created.")
             return False
-    except (httpx.RequestError, httpx.HTTPStatusError) as e:
-        logging.error(f"Error downloading {url}: {e}")
+            
+    except TimeoutException:
+        logging.error("Timeout while downloading the file")
         return False
     except Exception as e:
-        logging.error(f"Error writing file {local_path}: {e}")
+        logging.error(f"Error downloading file: {e}")
         return False
+    finally:
+        # Always close the browser to free resources
+        if driver:
+            driver.quit()
 
 def csv_to_sqlite(csv_path, db_name, table_name):
     """Loads data from a CSV file into a SQLite table, replacing the table if it exists."""
